@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Member, MemberTier, Order
+from app.models import Loan, Member, MemberTier, Order, OrderStatus
 from app.schemas import MemberCreate, MemberStats
 
 # Tiers from lowest to highest; a member's rank is their index in this list.
@@ -23,7 +23,7 @@ RESTRICTED_MIN_TIER = MemberTier.MASTER.value
 
 def tier_at_least(tier: str, minimum: str) -> bool:
     """True if ``tier`` ranks at or above ``minimum``."""
-    return TIER_ORDER.index(tier) > TIER_ORDER.index(minimum)
+    return TIER_ORDER.index(tier) >= TIER_ORDER.index(minimum)
 
 
 def ensure_can_access_restricted(member: Member) -> None:
@@ -75,4 +75,26 @@ def get_member_stats(db: Session, member_id: int, now: datetime) -> MemberStats:
     - overdue_loans counts unreturned loans with now > due_at.
     - late_fees_cents sums late fees of returned loans.
     """
-    raise NotImplementedError("get_member_stats")
+    get_member(db, member_id)
+
+    paid_orders = list(
+        db.scalars(
+            select(Order).where(Order.member_id == member_id, Order.status == OrderStatus.PAID.value)
+        )
+    )
+    orders_paid = len(paid_orders)
+    total_spent_cents = sum(o.total_cents for o in paid_orders)
+
+    loans = list(db.scalars(select(Loan).where(Loan.member_id == member_id)))
+    active_loans = sum(1 for l in loans if l.returned_at is None)
+    overdue_loans = sum(1 for l in loans if l.returned_at is None and now > l.due_at)
+    late_fees_cents = sum(l.late_fee_cents for l in loans if l.returned_at is not None)
+
+    return MemberStats(
+        member_id=member_id,
+        orders_paid=orders_paid,
+        total_spent_cents=total_spent_cents,
+        active_loans=active_loans,
+        overdue_loans=overdue_loans,
+        late_fees_cents=late_fees_cents,
+    )
