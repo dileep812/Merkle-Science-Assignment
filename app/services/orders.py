@@ -5,8 +5,9 @@ from typing import Dict
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import Member, MemberTier, Order, OrderStatus
+from app.models import Book, Member, MemberTier, Order, OrderItem, OrderStatus
 from app.schemas import OrderCreate
+from app.services.members import ensure_can_access_restricted
 
 # Percentage discount granted by each membership tier.
 TIER_DISCOUNT_PERCENT: Dict[str, int] = {
@@ -23,7 +24,10 @@ BULK_DISCOUNT_PERCENT = 5
 
 def calculate_discount_percent(member: Member, total_quantity: int) -> int:
     """Tier discount, plus the bulk discount when total quantity >= threshold."""
-    raise NotImplementedError("calculate_discount_percent")
+    percent = TIER_DISCOUNT_PERCENT.get(member.tier, 0)
+    if total_quantity >= BULK_QUANTITY_THRESHOLD:
+        percent += BULK_DISCOUNT_PERCENT
+    return percent
 
 
 def create_order(db: Session, data: OrderCreate, now: datetime) -> Order:
@@ -43,7 +47,60 @@ def create_order(db: Session, data: OrderCreate, now: datetime) -> Order:
     # 4. Decrement stock and build OrderItems with the current price as unit_price_cents.
     # 5. Compute subtotal, discount_percent (calculate_discount_percent), discount_cents, total.
     # 6. Save the pending Order with created_at = now and return it.
-    raise NotImplementedError("create_order")
+    member = db.get(Member, data.member_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    books_map = {}
+    for item in data.items:
+        book = db.get(Book, item.book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Book not found")
+        books_map[item.book_id] = book
+
+    for item in data.items:
+        book = books_map[item.book_id]
+        if book.restricted:
+            ensure_can_access_restricted(member)
+
+    for item in data.items:
+        book = books_map[item.book_id]
+        if book.stock < item.quantity:
+            raise HTTPException(status_code=409, detail=f"Insufficient stock for book {book.id}")
+
+    total_quantity = sum(item.quantity for item in data.items)
+    subtotal_cents = 0
+    order_items = []
+    for item in data.items:
+        book = books_map[item.book_id]
+        book.stock -= item.quantity
+        order_items.append(
+            OrderItem(
+                book_id=book.id,
+                quantity=item.quantity,
+                unit_price_cents=book.price_cents,
+            )
+        )
+        subtotal_cents += book.price_cents * item.quantity
+
+    discount_percent = calculate_discount_percent(member, total_quantity)
+    discount_cents = subtotal_cents * discount_percent // 100
+    total_cents = subtotal_cents - discount_cents
+
+    order = Order(
+        member_id=member.id,
+        status=OrderStatus.PENDING.value,
+        subtotal_cents=subtotal_cents,
+        discount_percent=discount_percent,
+        discount_cents=discount_cents,
+        total_cents=total_cents,
+        created_at=now,
+        items=order_items,
+    )
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    return order
 
 
 def get_order(db: Session, order_id: int) -> Order:
@@ -70,6 +127,10 @@ def cancel_order(db: Session, order_id: int) -> Order:
     order = get_order(db, order_id)
     if order.status != OrderStatus.PENDING.value:
         raise HTTPException(status_code=409, detail=f"Cannot cancel an order that is {order.status}")
+    for item in order.items:
+        book = db.get(Book, item.book_id)
+        if book:
+            book.stock += item.quantity
     order.status = OrderStatus.CANCELLED.value
     db.commit()
     db.refresh(order)
