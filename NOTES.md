@@ -36,5 +36,8 @@
 
 ## AI Usage
 - **Tools**: Google DeepMind Antigravity / Gemini coding assistant.
-- **Usage**: Scaffolding service functions against SPEC rules, writing repetitive schema validators, and rubber-ducking Supabase pooler configurations.
-- **Where AI was unhelpful/wrong**: When configuring PostgreSQL, the AI initially attempted to pass `check_same_thread: False` to the Postgres engine (which is SQLite-only and throws an error in `psycopg2`). Additionally, it initially tried connecting to Supabase via direct IPv6 hostnames which failed on IPv4 networks; I had to override it to configure the Supabase IPv4 connection pooler (`aws-0-ap-southeast-1.pooler.supabase.com:5432`) instead.
+- **Usage**: Scaffolding initial FastAPI route signatures, drafting Pydantic schemas, and quickly checking regex patterns for ISBN and email validation.
+- **Where AI was unhelpful/wrong (Edge Case Overrides)**:
+  1. **Member Tier Comparison**: The AI initially wrote `member.tier >= MemberTier.MASTER`, which evaluated Python strings alphabetically (`"apprentice" > "adept"` is `True`), completely inverting tier hierarchy. I had to override it by defining an ordered list `[apprentice, adept, master, supreme]` and comparing positional indices.
+  2. **Partial-day Late Fee Ceiling**: In loan returns, the AI used Python's `(now - due_at).days`. Because `timedelta.days` floors the value, a book returned 4 hours late was treated as 0 days late. I rewrote the calculation to use `math.ceil((now - due_at).total_seconds() / 86400)` so that any partial day strictly incurs the 25¢ fee as required by the specification.
+  3. **Strict Due Date Equality**: The AI generated `>=` for overdue checks (`now >= due_at`), which would prematurely penalize a return made at the exact second of expiration. I corrected it to strict inequality (`now > due_at`).
