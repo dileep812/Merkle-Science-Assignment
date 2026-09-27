@@ -1334,6 +1334,7 @@ async function returnLoan(id, button) {
     });
     state.catalog.loaded = false;
     loadLoans();
+    loadStats();
   } catch (err) {
     if (button.isConnected) setBusy(button, false);
     if (err.status === 409) loadLoans();
@@ -1409,6 +1410,7 @@ function initActions() {
       case 'order-pay': payOrder(id, target); break;
       case 'order-cancel': cancelOrder(id, target); break;
       case 'close-order-detail': state.orderDetail = null; renderOrderDetail(); break;
+      case 'loan-return': returnLoan(id, target); break;
       case 'refresh-orders': loadOrders(); break;
       case 'refresh-loans': loadLoans(); break;
       case 'refresh-reports': loadReports(); break;

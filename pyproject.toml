@@ -8,6 +8,8 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "sqlalchemy>=2.0,<3.0",
     "pydantic>=2.6,<3.0",
+    "psycopg2-binary>=2.9.13",
+    "python-dotenv>=1.2.3",
 ]
 
 [dependency-groups]
